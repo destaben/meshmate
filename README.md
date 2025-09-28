@@ -4,15 +4,7 @@ Meshtastic message listener and ping responder bot.
 
 ## Features
 
-- Listens t```text
-🔴 ALERTA ROJA TORMENTAS:
-Valencia, Alicante, Castellón
-📡 AEMET
-
-🔴 ALERTA ROJA LLUVIA:
-Madrid, Barcelona, Sevilla +3
-📡 AEMET
-```c text messages on configured channels
+- Listens to text messages on configured channels
 - Automatically responds to `/ping` commands with hop and signal info
 - **RED weather alerts** via `/meteo` command using AEMET API (Spain)
 - Modular handler system for extensible commands
@@ -71,6 +63,7 @@ docker rm meshmate-container
 ## Configuration
 
 ### Required Parameters
+
 - `--ip` or `--hostname`: IP address or hostname of the Meshtastic device
 
 ### Optional Parameters
@@ -102,13 +95,11 @@ Responds with technical information:
 Shows **RED (extreme) weather alerts only** for Spain. Sends separate cards for each alert type:
 
 ```text
-@username
-
-🔴 ALERTA ROJA TORM:
+🔴 ALERTA ROJA TORMENTAS:
 Valencia, Alicante, Castellón
 📡 AEMET
 
-� ALERTA ROJA LLUV:
+🔴 ALERTA ROJA LLUVIA:
 Madrid, Barcelona, Sevilla +3
 📡 AEMET
 ```
