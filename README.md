@@ -35,21 +35,22 @@ python main.py --ip 192.168.1.230 --channels all --aemet-api-key YOUR_API_KEY --
 
 ### Docker
 
-#### Docker Commands
+#### Pre-built Images (Recommended)
 
 ```bash
-# Build the image
-docker build -t meshmate .
+# Pull from GitHub Container Registry (automatic builds)
+docker pull ghcr.io/destaben/meshmate:latest
 
 # Run with ping only
-docker run -d --name meshmate-container meshmate --ip 192.168.1.230
+docker run -d --name meshmate-container ghcr.io/destaben/meshmate:latest \
+    --ip 192.168.1.230
 
 # Run with RED weather alerts
-docker run -d --name meshmate-container meshmate \
+docker run -d --name meshmate-container ghcr.io/destaben/meshmate:latest \
     --ip 192.168.1.230 --aemet-api-key YOUR_API_KEY
 
 # Run with custom channels and weather alerts
-docker run -d --name meshmate-container meshmate \
+docker run -d --name meshmate-container ghcr.io/destaben/meshmate:latest \
     --ip 192.168.1.230 --channels iberia madrid --aemet-api-key YOUR_API_KEY
 
 # View logs
@@ -58,6 +59,16 @@ docker logs -f meshmate-container
 # Stop the container
 docker stop meshmate-container
 docker rm meshmate-container
+```
+
+#### Manual Build
+
+```bash
+# Build the image locally
+docker build -t meshmate .
+
+# Run locally built image
+docker run -d --name meshmate-container meshmate --ip 192.168.1.230
 ```
 
 ## Configuration
@@ -138,6 +149,21 @@ meshmate/
 ├── Dockerfile          # Docker container configuration
 └── README.md           # This file
 ```
+
+## Automated Builds
+
+MeshMate includes GitHub Actions for automated building and deployment:
+
+- **Tests**: Run on every push/PR to ensure code quality
+- **Docker Images**: Automatically built and pushed on main branch updates
+- **Multi-platform**: Supports both AMD64 and ARM64 architectures
+- **Container Registry**: Images available on GitHub Container Registry
+
+### Available Images
+
+| Registry | Image | Updates |
+|----------|--------|---------|
+| GitHub Container Registry | `ghcr.io/destaben/meshmate:latest` | Every main branch push |
 
 ## Contributing
 
