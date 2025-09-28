@@ -6,6 +6,7 @@ from datetime import datetime
 import argparse
 import json
 import logging
+from handlers import PingHandler, MeteoHandler
 
 # Configure JSON logging
 class JSONFormatter(logging.Formatter):
@@ -54,6 +55,32 @@ def log_json(level, message, **extra_fields):
     record.extra = extra_fields
     logger.handle(record)
 
+# Initialize command handlers (will be set after parsing args)
+command_handlers = []
+monitored_channels = []
+log_all_messages = False
+
+def init_handlers(channels, log_all, aemet_api_key):
+    """Initialize handlers based on configuration"""
+    global command_handlers, monitored_channels, log_all_messages
+    monitored_channels = [ch.lower() for ch in channels] if 'all' not in channels else ['all']
+    log_all_messages = log_all
+    
+    # Initialize handlers - they can work on any channel now
+    handlers = [PingHandler()]
+    
+    # Only add MeteoHandler if API key is provided
+    if aemet_api_key:
+        handlers.append(MeteoHandler(api_key=aemet_api_key))
+    
+    command_handlers = handlers
+
+def should_process_channel(channel_name):
+    """Check if we should process messages from this channel"""
+    if 'all' in monitored_channels:
+        return True
+    return channel_name.lower() in monitored_channels
+
 def onReceive(packet, interface):
     # Only process text messages
     if 'decoded' in packet and 'portnum' in packet['decoded']:
@@ -82,89 +109,35 @@ def onReceive(packet, interface):
             else:
                 timestamp = 'No timestamp'
             
-            # Log message in JSON format
-            log_json("info", "Message received", 
-                event_type="message_received",
-                sender_id=sender_id,
-                message_text=message_text,
-                channel=channel,
-                channel_name=channel_name,
-                timestamp=timestamp,
-                rx_time=rx_time,
-                hop_limit=packet.get('hopLimit'),
-                hop_start=packet.get('hopStart'),
-                via_mqtt=packet.get('viaMqtt', False),
-                rx_snr=packet.get('rxSnr'),
-                rx_rssi=packet.get('rxRssi'),
-                message_id=packet.get('id')
-            )
+            # Check if we should process this channel
+            if not should_process_channel(channel_name):
+                return  # Skip messages from unmonitored channels
             
-            # Check for /ping command in iberia channel
-            if channel_name.lower() == 'iberia' and message_text.strip().lower() == '/ping':
-                try:
-                    # Extract hop information
-                    hop_limit = packet.get('hopLimit', 0)
-                    hop_start = packet.get('hopStart', 0)
-                    via_mqtt = packet.get('viaMqtt', False)
-                    rx_snr = packet.get('rxSnr', None)
-                    rx_rssi = packet.get('rxRssi', None)
-                    message_id = packet.get('id', None)
-                    
-                    # Calculate hops used (hopStart - hopLimit)
-                    hops_used = hop_start - hop_limit if hop_start > 0 else 0
-                    
-                    # Build response message
-                    response = "pong"
-                    
-                    # Add reception method
-                    if via_mqtt:
-                        response += " (via MQTT)"
-                    else:
-                        response += " (via radio)"
-                    
-                    # Add hop information
-                    if hop_start > 0:
-                        response += f" - {hops_used}/{hop_start} hops"
-                    
-                    # Add signal info if available
-                    signal_info = []
-                    if rx_snr is not None:
-                        signal_info.append(f"SNR: {rx_snr}dB")
-                    if rx_rssi is not None:
-                        signal_info.append(f"RSSI: {rx_rssi}dBm")
-                    
-                    if signal_info:
-                        response += f" ({', '.join(signal_info)})"
-                    
-                    # Add user mention to make it clear it's a response
-                    node_name = sender_id.replace('!', '') if sender_id.startswith('!') else sender_id
-                    final_response = f"@{node_name} {response}"
-                    
-                    interface.sendText(final_response, channelIndex=channel)
-                    
-                    log_json("info", "Ping response sent",
-                        event_type="ping_response_sent",
-                        response_text=final_response,
-                        original_message_id=message_id,
-                        sender_id=sender_id,
-                        channel_name=channel_name,
-                        channel=channel,
-                        hops_used=hops_used,
-                        hop_start=hop_start,
-                        hop_limit=hop_limit,
-                        via_mqtt=via_mqtt,
-                        rx_snr=rx_snr,
-                        rx_rssi=rx_rssi
-                    )
-                        
-                except Exception as e:
-                    log_json("error", "Error sending ping reply",
-                        event_type="ping_response_error",
-                        error=str(e),
-                        sender_id=sender_id,
-                        channel_name=channel_name,
-                        original_message_id=message_id
-                    )
+            # Log message in JSON format (only if configured or it's a command)
+            is_command = message_text.strip().startswith('/')
+            if log_all_messages or is_command:
+                log_json("info", "Message received", 
+                    event_type="message_received",
+                    sender_id=sender_id,
+                    message_text=message_text,
+                    channel=channel,
+                    channel_name=channel_name,
+                    timestamp=timestamp,
+                    rx_time=rx_time,
+                    hop_limit=packet.get('hopLimit'),
+                    hop_start=packet.get('hopStart'),
+                    via_mqtt=packet.get('viaMqtt', False),
+                    rx_snr=packet.get('rxSnr'),
+                    rx_rssi=packet.get('rxRssi'),
+                    message_id=packet.get('id'),
+                    is_command=is_command
+                )
+            
+            # Check if any handler can process this message
+            for handler in command_handlers:
+                if handler.can_handle(message_text, channel_name):
+                    handler.handle(packet, interface, log_json)
+                    break  # Only let the first matching handler process the message
 
 def onConnection(interface, topic=pub.AUTO_TOPIC):
     log_json("info", "Connected to Meshtastic network",
@@ -180,11 +153,23 @@ pub.subscribe(onConnection, "meshtastic.connection.established")
 parser = argparse.ArgumentParser(description='Meshtastic message listener and ping responder')
 parser.add_argument('--ip', '--hostname', required=True,
                     help='IP address or hostname of the Meshtastic device (required)')
+parser.add_argument('--channels', nargs='*', default=['iberia'],
+                    help='List of channels to monitor (default: iberia). Use "all" to monitor all channels')
+parser.add_argument('--log-all-messages', action='store_true',
+                    help='Log all messages from monitored channels, not just commands')
+parser.add_argument('--aemet-api-key',
+                    help='AEMET API key for weather warnings (required for /meteo command)')
 args = parser.parse_args()
+
+# Initialize handlers with configuration
+init_handlers(args.channels, args.log_all_messages, args.aemet_api_key)
 
 log_json("info", "Starting Meshtastic connection",
     event_type="startup",
-    target_host=args.ip
+    target_host=args.ip,
+    monitored_channels=monitored_channels,
+    log_all_messages=log_all_messages,
+    meteo_enabled=args.aemet_api_key is not None
 )
 
 try:

@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application
 COPY main.py .
+COPY handlers/ handlers/
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash meshmate
@@ -20,5 +21,5 @@ USER meshmate
 # Set the entrypoint to run the script
 ENTRYPOINT ["python", "main.py"]
 
-# Default command shows help if no IP is provided
+# Default command shows help if no arguments are provided
 CMD ["--help"]
