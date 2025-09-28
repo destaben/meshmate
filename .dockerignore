@@ -1,0 +1,28 @@
+# Git files
+.git
+.gitignore
+
+# Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
+LICENSE
+
+# Docker files (except Dockerfile itself)
+.dockerignore
