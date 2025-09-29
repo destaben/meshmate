@@ -45,7 +45,7 @@ class MeteoHandler(BaseHandler):
                 return
             
             # Get response cards (one per phenomenon type)
-            response_cards = self._format_warnings_response(warnings)
+            response_cards = self._format_warnings_response(warnings, log_json)
             
             # Send each alert card separately (no @ mention)
             total_cards_sent = 0
@@ -99,8 +99,15 @@ class MeteoHandler(BaseHandler):
         
         for attempt in range(max_retries):
             try:
+                # Headers to avoid being blocked
+                headers = {
+                    'User-Agent': 'MeshMate/1.0 (Weather Alert Bot)',
+                    'Accept': 'application/json',
+                    'Connection': 'close'
+                }
+                
                 # First, get the data URL from AEMET API
-                response = requests.get(self.aemet_warnings_url, timeout=30)
+                response = requests.get(self.aemet_warnings_url, headers=headers, timeout=30)
                 
                 log_json("info", "AEMET API request",
                     event_type="aemet_api_request",
@@ -112,13 +119,21 @@ class MeteoHandler(BaseHandler):
                 if response.status_code == 200:
                     api_response = response.json()
                     
+                    if log_json:
+                        log_json("info", "AEMET API response received",
+                            event_type="aemet_api_response",
+                            estado=api_response.get('estado'),
+                            descripcion=api_response.get('descripcion'),
+                            attempt=attempt + 1
+                        )
+                    
                     # Check if the response is successful
                     if api_response.get('estado') == 200 and api_response.get('descripcion') == 'exito':
                         data_url = api_response.get('datos', '')
                         
                         if data_url:
                             # Now get the actual CAP warnings data
-                            data_response = requests.get(data_url, timeout=30)
+                            data_response = requests.get(data_url, headers=headers, timeout=30)
                             
                             if data_response.status_code == 200:
                                 content_type = data_response.headers.get('content-type', '')
@@ -162,11 +177,20 @@ class MeteoHandler(BaseHandler):
                                 event_type="aemet_no_data_url"
                             )
                     else:
-                        log_json("error", "AEMET API error response",
-                            event_type="aemet_api_error",
-                            estado=api_response.get('estado'),
-                            descripcion=api_response.get('descripcion')
-                        )
+                        # Check for common API key errors
+                        if api_response.get('estado') == 401:
+                            log_json("error", "AEMET API key unauthorized",
+                                event_type="aemet_api_key_invalid",
+                                estado=api_response.get('estado'),
+                                descripcion=api_response.get('descripcion'),
+                                troubleshooting="Check if your AEMET API key is valid and not expired"
+                            )
+                        else:
+                            log_json("error", "AEMET API error response",
+                                event_type="aemet_api_error",
+                                estado=api_response.get('estado'),
+                                descripcion=api_response.get('descripcion')
+                            )
                 else:
                     log_json("error", "AEMET API request failed",
                         event_type="aemet_request_failed",
@@ -195,6 +219,12 @@ class MeteoHandler(BaseHandler):
                 )
                 
                 if attempt < max_retries - 1:
+                    log_json("info", "Retrying AEMET API request",
+                        event_type="aemet_retry",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        delay_seconds=retry_delay
+                    ) if log_json else None
                     time.sleep(retry_delay)
                     continue
                 else:
@@ -337,7 +367,7 @@ class MeteoHandler(BaseHandler):
         """Helper to safely extract text from XML element"""
         return element.text.strip() if element is not None and element.text else default
     
-    def _format_warnings_response(self, warnings: List[Dict[str, Any]]) -> List[str]:
+    def _format_warnings_response(self, warnings: List[Dict[str, Any]], log_json=None) -> List[str]:
         """Format warnings into readable response messages - RED ALERTS ONLY
         Returns list of messages (one per phenomenon if needed to stay under 200 chars)"""
         if not warnings:
@@ -354,11 +384,23 @@ class MeteoHandler(BaseHandler):
                 'rojo' in severity or 'extreme' in severity):
                 red_warnings.append(warning)
         
+        if log_json:
+            log_json("info", "RED alerts processing",
+                event_type="red_alerts_filtering",
+                total_warnings=len(warnings),
+                red_alerts_found=len(red_warnings)
+            )
+        
         if not red_warnings:
+            if log_json:
+                log_json("info", "No RED alerts active",
+                    event_type="no_red_alerts"
+                )
             return ["✅ Sin avisos ROJOS activos.\n📡 AEMET"]
         
         # Group red warnings by phenomenon 
         warning_groups = {}
+        
         for warning in red_warnings:
             event = warning['event']
             phenomenon = self._extract_phenomenon(event.lower())
@@ -367,10 +409,34 @@ class MeteoHandler(BaseHandler):
                 warning_groups[phenomenon] = set()
             
             # Add all areas for this phenomenon (clean names first to avoid duplicates)
+            areas_for_phenomenon = []
             for area in warning.get('areas', []):
                 clean_area = self._clean_area_name(area)
                 if clean_area:  # Only add non-empty clean names
                     warning_groups[phenomenon].add(clean_area)
+                    areas_for_phenomenon.append({
+                        "original": area,
+                        "cleaned": clean_area
+                    })
+            
+            if log_json and areas_for_phenomenon:
+                log_json("info", "RED alert processed",
+                    event_type="red_alert_processed",
+                    event=event,
+                    phenomenon=phenomenon,
+                    nivel=warning.get('nivel', ''),
+                    severity=warning.get('severity', ''),
+                    areas=areas_for_phenomenon
+                )
+        
+        # Log phenomenon grouping
+        if log_json:
+            log_json("info", "Phenomenon grouping completed",
+                event_type="phenomenon_grouping",
+                phenomena_count=len(warning_groups),
+                phenomena=list(warning_groups.keys()),
+                groups={k: sorted(list(v)) for k, v in warning_groups.items()}
+            )
         
         # Create individual cards for each phenomenon
         response_cards = []
@@ -378,7 +444,6 @@ class MeteoHandler(BaseHandler):
         for phenomenon, areas_set in warning_groups.items():
             # Areas are already cleaned and deduplicated
             clean_areas = sorted(list(areas_set))
-            
             short_phenomenon = self._get_short_phenomenon(phenomenon)
             
             # Try to fit ALL provinces in one card (max ~180 chars for content)
@@ -393,6 +458,17 @@ class MeteoHandler(BaseHandler):
                 # All provinces fit!
                 card_content = base_card + all_provinces_text + footer
                 response_cards.append(card_content)
+                
+                if log_json:
+                    log_json("info", "Alert card created",
+                        event_type="alert_card_created",
+                        phenomenon=phenomenon,
+                        provinces_count=len(clean_areas),
+                        provinces=clean_areas,
+                        card_length=len(card_content),
+                        truncated=False,
+                        message_content=card_content
+                    )
             else:
                 # Too many provinces, show as many as possible
                 fitting_provinces = []
@@ -419,6 +495,26 @@ class MeteoHandler(BaseHandler):
                 
                 card_content = base_card + provinces_text + footer
                 response_cards.append(card_content)
+                
+                if log_json:
+                    log_json("info", "Alert card created with truncation",
+                        event_type="alert_card_created",
+                        phenomenon=phenomenon,
+                        total_provinces=len(clean_areas),
+                        shown_provinces=len(fitting_provinces),
+                        provinces_shown=fitting_provinces,
+                        provinces_hidden=len(clean_areas) - len(fitting_provinces),
+                        card_length=len(card_content),
+                        truncated=True,
+                        message_content=card_content
+                    )
+        
+        if log_json:
+            log_json("info", "Message cards generation completed",
+                event_type="message_cards_completed",
+                total_cards=len(response_cards),
+                cards_info=[{"length": len(card), "content": card} for card in response_cards]
+            )
         
         return response_cards
     

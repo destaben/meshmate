@@ -3,9 +3,9 @@ import meshtastic
 import meshtastic.tcp_interface
 from pubsub import pub
 from datetime import datetime
-import argparse
 import json
 import logging
+import os
 from handlers import PingHandler, MeteoHandler
 
 # Configure JSON logging
@@ -149,34 +149,44 @@ def onConnection(interface, topic=pub.AUTO_TOPIC):
 pub.subscribe(onReceive, "meshtastic.receive")
 pub.subscribe(onConnection, "meshtastic.connection.established")
 
-# Parse command line arguments
-parser = argparse.ArgumentParser(description='Meshtastic message listener and ping responder')
-parser.add_argument('--ip', '--hostname', required=True,
-                    help='IP address or hostname of the Meshtastic device (required)')
-parser.add_argument('--channels', nargs='*', default=['iberia'],
-                    help='List of channels to monitor (default: iberia). Use "all" to monitor all channels')
-parser.add_argument('--log-all-messages', action='store_true',
-                    help='Log all messages from monitored channels, not just commands')
-parser.add_argument('--aemet-api-key',
-                    help='AEMET API key for weather warnings (required for /meteo command)')
-args = parser.parse_args()
+# Get configuration from environment variables
+meshtastic_ip = os.getenv('MESHTASTIC_IP')
+meshtastic_hostname = os.getenv('MESHTASTIC_HOSTNAME')
+channels = os.getenv('CHANNELS', 'iberia').split()
+log_all_messages = os.getenv('LOG_ALL_MESSAGES', 'false').lower() == 'true'
+aemet_api_key = os.getenv('AEMET_API_KEY')
+
+# Determine connection target (IP takes priority over hostname)
+connection_target = meshtastic_ip or meshtastic_hostname
+
+if not connection_target:
+    log_json("error", "Missing connection configuration", 
+        event_type="config_error",
+        error="Either MESHTASTIC_IP or MESHTASTIC_HOSTNAME environment variable must be set",
+        troubleshooting_tips=[
+            "Set MESHTASTIC_IP environment variable with device IP address",
+            "OR set MESHTASTIC_HOSTNAME environment variable with device hostname",
+            "Example: export MESHTASTIC_IP=192.168.1.230"
+        ]
+    )
+    exit(1)
 
 # Initialize handlers with configuration
-init_handlers(args.channels, args.log_all_messages, args.aemet_api_key)
+init_handlers(channels, log_all_messages, aemet_api_key)
 
 log_json("info", "Starting Meshtastic connection",
     event_type="startup",
-    target_host=args.ip,
+    target_host=connection_target,
     monitored_channels=monitored_channels,
     log_all_messages=log_all_messages,
-    meteo_enabled=args.aemet_api_key is not None
+    meteo_enabled=aemet_api_key is not None
 )
 
 try:
-    interface = meshtastic.tcp_interface.TCPInterface(hostname=args.ip)
+    interface = meshtastic.tcp_interface.TCPInterface(hostname=connection_target)
     log_json("info", "TCP interface created successfully",
         event_type="interface_created",
-        hostname=args.ip
+        hostname=connection_target
     )
     
     # Keep running
@@ -187,10 +197,10 @@ except Exception as e:
     log_json("error", "Connection failed",
         event_type="connection_failed",
         error=str(e),
-        hostname=args.ip,
+        hostname=connection_target,
         troubleshooting_tips=[
             "Check if the device is on and connected to network",
-            f"Verify the IP address: {args.ip}",
+            f"Verify the IP address: {connection_target}",
             "Ensure the device has TCP interface enabled",
             "Check firewall settings"
         ]
