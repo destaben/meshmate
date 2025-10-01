@@ -130,12 +130,12 @@ Madrid, Barcelona, Sevilla +3
 Shows project information and encourages contributions:
 
 ```text
-🤖 MeshMate Bot - Bot inteligente para redes Meshtastic
+🤖 MeshMate Bot
 
-✨ Funciones: Ping, avisos meteorológicos, información del proyecto
-🌐 Proyecto: github.com/destaben/meshmate
+✨ Ping, avisos meteo, info
+🔗 github.com/destaben/meshmate
 
-¡Contribuye con ideas y código!
+¡Contribuye! 🚀
 ```
 
 ### `/?`

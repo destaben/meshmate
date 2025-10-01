@@ -23,14 +23,12 @@ class InfoHandler(BaseHandler):
                 command_text=info['message_text']
             )
             
-            # Create project info message
+            # Create project info message (optimized for Meshtastic limits)
             info_message = (
-                "🤖 MeshMate Bot\n"
-                "Bot automatizado para redes Meshtastic que responde a comandos y "
-                "proporciona alertas meteorológicas rojas de AEMET.\n\n"
+                "🤖 MeshMate Bot\n\n"
+                "✨ Ping, avisos meteo, info\n"
                 "🔗 github.com/destaben/meshmate\n\n"
-                "¡Tu contribución es bienvenida! "
-                "Únete al desarrollo del proyecto. 🚀"
+                "¡Contribuye! 🚀"
             )
             
             # Send info message (no @ mention)
