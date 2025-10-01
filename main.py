@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 import logging
 import os
-from handlers import PingHandler, MeteoHandler
+from handlers import PingHandler, MeteoHandler, InfoHandler, HelpHandler
 
 # Configure JSON logging
 class JSONFormatter(logging.Formatter):
@@ -67,7 +67,11 @@ def init_handlers(channels, log_all, aemet_api_key):
     log_all_messages = log_all
     
     # Initialize handlers - they can work on any channel now
-    handlers = [PingHandler()]
+    handlers = [
+        PingHandler(),
+        InfoHandler(), 
+        HelpHandler()
+    ]
     
     # Only add MeteoHandler if API key is provided
     if aemet_api_key:

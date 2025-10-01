@@ -89,6 +89,8 @@ MeshMate uses a modular handler system where each command is implemented as a se
 
 - **PingHandler** (`handlers/ping_handler.py`): Handles `/ping` commands
 - **MeteoHandler** (`handlers/meteo_handler.py`): Handles `/meteo` weather alerts
+- **InfoHandler** (`handlers/info_handler.py`): Handles `/meshmate` project information
+- **HelpHandler** (`handlers/help_handler.py`): Handles `/?` help command
 - **BaseHandler** (`handlers/base_handler.py`): Common functionality for all handlers
 
 ## Commands
@@ -122,6 +124,34 @@ Madrid, Barcelona, Sevilla +3
 - Shows all affected provinces (up to 200 character limit)
 - Clean province names (removes "Provincia de", "Litoral de", etc.)
 - Automatic splitting if multiple alert types exist
+
+### `/meshmate`
+
+Shows project information and encourages contributions:
+
+```text
+🤖 MeshMate Bot - Bot inteligente para redes Meshtastic
+
+✨ Funciones: Ping, avisos meteorológicos, información del proyecto
+🌐 Proyecto: github.com/destaben/meshmate
+
+¡Contribuye con ideas y código!
+```
+
+### `/?`
+
+Displays available commands:
+
+```text
+📋 Comandos disponibles:
+
+/ping - Test de conectividad
+/meteo - Avisos rojos AEMET
+/meshmate - Info del proyecto
+/? - Esta ayuda
+
+🤖 MeshMate Bot
+```
 
 ## Requirements
 
