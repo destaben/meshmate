@@ -174,42 +174,135 @@ if not connection_target:
 # Initialize handlers with configuration
 init_handlers(channels, log_all_messages, aemet_api_key)
 
-log_json("info", "Starting Meshtastic connection",
+log_json("info", "Starting Meshtastic connection with auto-reconnect",
     event_type="startup",
     target_host=connection_target,
     monitored_channels=monitored_channels,
     log_all_messages=log_all_messages,
-    meteo_enabled=aemet_api_key is not None
+    meteo_enabled=aemet_api_key is not None,
+    reconnect_interval=60
 )
 
-try:
-    interface = meshtastic.tcp_interface.TCPInterface(hostname=connection_target)
-    log_json("info", "TCP interface created successfully",
-        event_type="interface_created",
-        hostname=connection_target
-    )
-    
-    # Keep running
-    while True:
-        time.sleep(1)
-        
-except Exception as e:
-    log_json("error", "Connection failed",
-        event_type="connection_failed",
-        error=str(e),
-        hostname=connection_target,
-        troubleshooting_tips=[
-            "Check if the device is on and connected to network",
-            f"Verify the IP address: {connection_target}",
-            "Ensure the device has TCP interface enabled",
-            "Check firewall settings"
-        ]
-    )
-finally:
+interface = None
+reconnect_interval = 60  # seconds
+
+def create_connection():
+    """Create a new Meshtastic TCP interface"""
+    global interface
     try:
+        if interface:
+            try:
+                interface.close()
+            except:
+                pass
+        
+        interface = meshtastic.tcp_interface.TCPInterface(hostname=connection_target)
+        log_json("info", "TCP interface created successfully",
+            event_type="interface_created",
+            hostname=connection_target
+        )
+        return True
+    except Exception as e:
+        log_json("error", "Failed to create interface",
+            event_type="interface_creation_failed",
+            error=str(e),
+            hostname=connection_target
+        )
+        return False
+
+def is_connection_healthy():
+    """Check if the connection is still healthy"""
+    try:
+        if interface and hasattr(interface, 'socket') and interface.socket:
+            # Try to get socket status
+            return interface.socket.fileno() != -1
+    except:
+        pass
+    return False
+
+# Main connection loop with auto-reconnect
+while True:
+    try:
+        # Create initial connection
+        if not create_connection():
+            log_json("warning", "Initial connection failed, retrying in 60 seconds",
+                event_type="connection_retry_scheduled",
+                retry_delay=reconnect_interval
+            )
+            time.sleep(reconnect_interval)
+            continue
+        
+        # Main monitoring loop
+        connection_start_time = time.time()
+        last_health_check = time.time()
+        
+        while True:
+            try:
+                # Check connection health every 30 seconds
+                current_time = time.time()
+                if current_time - last_health_check > 30:
+                    if not is_connection_healthy():
+                        log_json("warning", "Connection health check failed",
+                            event_type="connection_unhealthy",
+                            uptime_seconds=int(current_time - connection_start_time)
+                        )
+                        break  # Break inner loop to reconnect
+                    last_health_check = current_time
+                
+                time.sleep(1)
+                
+            except KeyboardInterrupt:
+                log_json("info", "Shutdown requested by user",
+                    event_type="user_shutdown",
+                    uptime_seconds=int(time.time() - connection_start_time)
+                )
+                raise
+            except Exception as e:
+                log_json("warning", "Error in monitoring loop",
+                    event_type="monitoring_error",
+                    error=str(e),
+                    uptime_seconds=int(time.time() - connection_start_time)
+                )
+                break  # Break inner loop to reconnect
+        
+        # Connection lost, schedule reconnect
+        log_json("warning", "Connection lost, reconnecting in 60 seconds",
+            event_type="connection_lost",
+            uptime_seconds=int(time.time() - connection_start_time),
+            reconnect_delay=reconnect_interval
+        )
+        
+        # Clean up current connection
+        try:
+            if interface:
+                interface.close()
+        except:
+            pass
+        
+        time.sleep(reconnect_interval)
+        
+    except KeyboardInterrupt:
+        log_json("info", "Shutting down gracefully",
+            event_type="graceful_shutdown"
+        )
+        break
+    except Exception as e:
+        log_json("error", "Unexpected error in main loop",
+            event_type="main_loop_error",
+            error=str(e),
+            reconnect_delay=reconnect_interval
+        )
+        time.sleep(reconnect_interval)
+
+# Final cleanup
+try:
+    if interface:
         interface.close()
         log_json("info", "Connection closed",
             event_type="connection_closed"
         )
-    except:
-        pass
+except Exception as e:
+    log_json("warning", "Error during cleanup",
+        event_type="cleanup_error",
+        error=str(e)
+    )
