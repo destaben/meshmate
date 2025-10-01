@@ -37,10 +37,22 @@ class MeteoHandler(BaseHandler):
             
             # Check if there was a timeout (None returned)
             if warnings is None:
-                log_json("warning", "AEMET API timeout - no response sent",
+                log_json("warning", "AEMET API timeout - sending unavailable message",
                     event_type="aemet_timeout",
                     sender_id=info['sender_id'],
                     channel=info['channel']
+                )
+                
+                # Send unavailable message to user
+                unavailable_msg = "⚠️ AEMET no está disponible en estos momentos.\nInténtelo más tarde.\n📡 Servicio Meteorológico"
+                interface.sendText(unavailable_msg, channelIndex=info['channel'])
+                
+                # Log the unavailable message sent
+                log_json("info", "AEMET unavailable message sent",
+                    event_type="aemet_unavailable_message_sent",
+                    sender_id=info['sender_id'],
+                    channel=info['channel'],
+                    message_content=unavailable_msg
                 )
                 return
             
@@ -228,7 +240,12 @@ class MeteoHandler(BaseHandler):
                     time.sleep(retry_delay)
                     continue
                 else:
-                    break
+                    # All retries exhausted due to persistent errors
+                    log_json("error", "AEMET API permanently unavailable after all retries",
+                        event_type="aemet_permanently_unavailable",
+                        max_retries=max_retries
+                    ) if log_json else None
+                    return None  # Return None to trigger unavailable message
         
         return warnings
     
