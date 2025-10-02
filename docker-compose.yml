@@ -2,7 +2,6 @@ services:
   meshmate:
     image: ghcr.io/destaben/meshmate:latest
     container_name: meshmate
-    restart: unless-stopped
     environment:
       # Meshtastic device connection
       - MESHTASTIC_IP=${MESHTASTIC_IP}
@@ -17,13 +16,16 @@ services:
       # Logging configuration
       - LOG_ALL_MESSAGES=${LOG_ALL_MESSAGES:-false}
     
-    # Health check to ensure the container is working
+    # Health check to ensure the container is working properly
     healthcheck:
       test: ["CMD", "pgrep", "-f", "python main.py"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 30s
+    
+    # Restart policy - always restart on failure, with backoff
+    restart: on-failure:10
     
     # Resource limits (adjust as needed)
     deploy:
@@ -39,3 +41,4 @@ services:
     network_mode: "host"  # Use host network for Meshtastic TCP access
     volumes:
       - ./logs:/app/logs:rw
+      - ./data:/app/data:rw  # Persistent storage for schedules

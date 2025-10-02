@@ -26,9 +26,10 @@ class HelpHandler(BaseHandler):
             # Create help message with available commands
             help_message = (
                 "📋 Comandos disponibles:\n\n"
-                "/ping - Test de conectividad\n"
-                "/meteo - Avisos rojos AEMET\n"
-                "/meshmate - Info del proyecto\n"
+                "/ping - Test de conectividad\n\n"
+                "/meteo - Avisos rojos AEMET\n\n"
+                "/schedule - Programar comandos\n\n"
+                "/meshmate - Info del proyecto\n\n"
                 "/? - Esta ayuda\n\n"
                 "🤖 MeshMate Bot"
             )

@@ -45,12 +45,17 @@ docker pull ghcr.io/destaben/meshmate:latest
 docker run -d --name meshmate-container ghcr.io/destaben/meshmate:latest \
     --ip 192.168.1.230
 
-# Run with RED weather alerts
-docker run -d --name meshmate-container ghcr.io/destaben/meshmate:latest \
+# Run with RED weather alerts and persistent storage
+docker run -d --name meshmate-container \
+    -v $(pwd)/data:/app/data \
+    ghcr.io/destaben/meshmate:latest \
     --ip 192.168.1.230 --aemet-api-key YOUR_API_KEY
 
-# Run with custom channels and weather alerts
-docker run -d --name meshmate-container ghcr.io/destaben/meshmate:latest \
+# Run with custom channels, weather alerts, and logs
+docker run -d --name meshmate-container \
+    -v $(pwd)/data:/app/data \
+    -v $(pwd)/logs:/app/logs \
+    ghcr.io/destaben/meshmate:latest \
     --ip 192.168.1.230 --channels iberia madrid --aemet-api-key YOUR_API_KEY
 
 # View logs
@@ -59,6 +64,23 @@ docker logs -f meshmate-container
 # Stop the container
 docker stop meshmate-container
 docker rm meshmate-container
+```
+
+#### Docker Compose (Recommended for Production)
+
+```bash
+# Copy environment configuration
+cp .env.example .env
+# Edit .env with your configuration
+
+# Start with docker-compose (includes persistent volumes)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
 ```
 
 #### Manual Build
@@ -89,9 +111,46 @@ MeshMate uses a modular handler system where each command is implemented as a se
 
 - **PingHandler** (`handlers/ping_handler.py`): Handles `/ping` commands
 - **MeteoHandler** (`handlers/meteo_handler.py`): Handles `/meteo` weather alerts
+- **ScheduleHandler** (`handlers/schedule_handler.py`): Handles `/schedule` automated commands
 - **InfoHandler** (`handlers/info_handler.py`): Handles `/meshmate` project information
 - **HelpHandler** (`handlers/help_handler.py`): Handles `/?` help command
 - **BaseHandler** (`handlers/base_handler.py`): Common functionality for all handlers
+
+## Scheduler System
+
+The scheduler system allows users to automate commands and reminders with flexible timing:
+
+- **ScheduleManager** (`schedule_manager.py`): Manages scheduled tasks with JSON persistence
+- **One-time Schedules**: Execute once at specified time, then auto-delete
+- **Recurring Schedules**: Execute repeatedly on specified weekdays (Spanish names)
+- **Background Worker**: Runs in a separate thread checking for due schedules every minute
+- **User Limits**: Maximum 5 schedules per user to prevent abuse
+- **Persistence**: Schedules survive bot restarts through JSON file storage
+
+## Connection Resilience
+
+MeshMate includes multiple layers of connection resilience:
+
+### Auto-Reconnection System
+
+- **Health Monitoring**: Connection health checks every 30 seconds
+- **Aggressive Cleanup**: Complete interface cleanup on connection loss
+- **Thread Safety**: Safe message sending with connection validation
+- **Background Recovery**: Automatic reconnection with exponential backoff
+
+### Error Handling
+
+- **BrokenPipe Suppression**: Silences harmless Meshtastic heartbeat errors
+- **Connection Validation**: Multi-layer connection health testing
+- **Graceful Degradation**: Schedules and commands skip when connection is down
+- **Process Restart**: Automatic process restart after 10 consecutive failures
+
+### Docker Integration
+
+- **Health Checks**: Container health monitoring with automatic restart
+- **Persistent Data**: Volumes ensure schedules survive container restarts
+- **Resource Limits**: Prevents resource exhaustion during reconnection storms
+- **Restart Policies**: Automatic container restart on failure
 
 ## Commands
 
@@ -138,6 +197,43 @@ Shows project information and encourages contributions:
 ¡Contribuye! 🚀
 ```
 
+### `/schedule`
+
+Schedule automated commands and reminders:
+
+```text
+📅 Schedule
+
+• add HH:MM texto [días]
+• list
+• del ID
+
+Ej: add 09:30 /ping all
+```
+
+**Features:**
+
+- Up to 5 schedules per user
+- Support for commands (`/ping`, `/meteo`, etc.) and text messages
+- **One-time execution** by default (runs once then auto-deletes)
+- **Recurring schedules** with Spanish weekdays (lunes, martes, miercoles, jueves, viernes, sabado, domingo)
+- Persistence across bot restarts
+- Individual user management
+
+**Usage Examples:**
+
+- `/schedule add 08:00 /meteo` - Check weather alerts once at 8 AM
+- `/schedule add 14:00 Lunch break lunes,miercoles,viernes` - Recurring lunch reminder
+- `/schedule add 09:30 /ping sabado,domingo` - Weekend connectivity tests
+- `/schedule add 07:00 Good morning all` - Daily morning message
+- `/schedule list` - View your active schedules
+- `/schedule del 2` - Delete schedule #2
+
+**Weekday Format:**
+
+- Use Spanish weekday names separated by commas: `lunes,martes,miercoles,jueves,viernes,sabado,domingo`
+- Use `all` for every day of the week
+
 ### `/?`
 
 Displays available commands:
@@ -147,6 +243,7 @@ Displays available commands:
 
 /ping - Test de conectividad
 /meteo - Avisos rojos AEMET
+/schedule - Programar comandos
 /meshmate - Info del proyecto
 /? - Esta ayuda
 
@@ -166,18 +263,47 @@ Displays available commands:
 2. Verify your email
 3. Use the provided API key with `--aemet-api-key` parameter
 
+## Data Persistence
+
+MeshMate stores user data in persistent files:
+
+- **`data/schedules.json`** - User scheduled commands and reminders
+- **`logs/`** - Application logs (optional, for debugging)
+
+### Docker Volumes
+
+When running with Docker, mount volumes to persist data between container restarts:
+
+```bash
+# Minimal persistence (schedules only)
+-v $(pwd)/data:/app/data
+
+# Full persistence (schedules + logs)
+-v $(pwd)/data:/app/data -v $(pwd)/logs:/app/logs
+```
+
+The `docker-compose.yml` file includes these volumes automatically.
+
 ## Project Structure
 
 ```text
 meshmate/
-├── main.py              # Main application entry point
-├── handlers/            # Modular command handlers
-│   ├── base_handler.py  # Base class for all handlers
-│   ├── ping_handler.py  # Ping command implementation
-│   └── meteo_handler.py # Weather alerts implementation
-├── requirements.txt     # Python dependencies
-├── Dockerfile          # Docker container configuration
-└── README.md           # This file
+├── main.py                 # Main application entry point
+├── schedule_manager.py     # Schedule management and persistence
+├── handlers/               # Modular command handlers
+│   ├── base_handler.py     # Base class for all handlers
+│   ├── ping_handler.py     # Ping command implementation
+│   ├── meteo_handler.py    # Weather alerts implementation
+│   ├── schedule_handler.py # Schedule management commands
+│   ├── info_handler.py     # Project information
+│   └── help_handler.py     # Help command
+├── data/                   # Persistent data directory
+│   └── schedules.json      # Scheduled tasks with weekday support (auto-created)
+├── logs/                   # Application logs (optional)
+├── requirements.txt        # Python dependencies
+├── Dockerfile             # Docker container configuration
+├── docker-compose.yml     # Production deployment configuration
+└── README.md              # This file
 ```
 
 ## Automated Builds

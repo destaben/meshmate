@@ -26,8 +26,8 @@ class InfoHandler(BaseHandler):
             # Create project info message (optimized for Meshtastic limits)
             info_message = (
                 "🤖 MeshMate Bot\n\n"
-                "✨ Ping, avisos meteo, info\n"
-                "🔗 github.com/destaben/meshmate\n\n"
+                "✨ Ping, avisos meteo, info\n\n"
+                "🔗 https://github.com/destaben/meshmate\n\n"
                 "¡Contribuye! 🚀"
             )
             

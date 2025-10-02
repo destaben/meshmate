@@ -44,7 +44,7 @@ class MeteoHandler(BaseHandler):
                 )
                 
                 # Send unavailable message to user
-                unavailable_msg = "⚠️ AEMET no está disponible en estos momentos.\nInténtelo más tarde.\n📡 Servicio Meteorológico"
+                unavailable_msg = "⚠️ AEMET no está disponible en estos momentos\n\nInténtelo más tarde.\n📡 Servicio Meteorológico"
                 interface.sendText(unavailable_msg, channelIndex=info['channel'])
                 
                 # Log the unavailable message sent
@@ -388,7 +388,7 @@ class MeteoHandler(BaseHandler):
         """Format warnings into readable response messages - RED ALERTS ONLY
         Returns list of messages (one per phenomenon if needed to stay under 200 chars)"""
         if not warnings:
-            return ["✅ Sin avisos ROJOS activos en España.\n📡 AEMET"]
+            return ["✅ Sin avisos ROJOS activos en España.\n\n📡 AEMET"]
         
         # Filter for RED alerts only (Rojo/Red level)
         red_warnings = []
