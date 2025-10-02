@@ -48,48 +48,7 @@ for name in logging.Logger.manager.loggerDict:
         logging.getLogger(name).setLevel(logging.CRITICAL)
         logging.getLogger(name).propagate = False
 
-# Suppress BrokenPipeError from meshtastic threads
 import sys
-original_excepthook = sys.excepthook
-
-def custom_excepthook(exctype, value, traceback):
-    """Custom exception handler to suppress BrokenPipeError from meshtastic heartbeat threads"""
-    if exctype == BrokenPipeError:
-        # Log it as a debug message instead of letting it print to stderr
-        log_json("debug", "Suppressed BrokenPipeError from background thread",
-            event_type="suppressed_broken_pipe",
-            error=str(value)
-        )
-        return
-    
-    # For all other exceptions, use the original handler
-    original_excepthook(exctype, value, traceback)
-
-# Install our custom exception handler
-sys.excepthook = custom_excepthook
-
-# Also handle thread exceptions
-def thread_exception_handler(args):
-    """Handle exceptions in threads, particularly for meshtastic heartbeat errors"""
-    if args.exc_type == BrokenPipeError:
-        log_json("debug", "Suppressed BrokenPipeError from thread",
-            event_type="suppressed_thread_broken_pipe",
-            thread_name=args.thread.name if args.thread else "unknown",
-            error=str(args.exc_value)
-        )
-        return
-    
-    # Log other thread exceptions
-    log_json("error", "Unhandled thread exception",
-        event_type="thread_exception",
-        thread_name=args.thread.name if args.thread else "unknown",
-        exception_type=args.exc_type.__name__ if args.exc_type else "unknown",
-        error=str(args.exc_value)
-    )
-
-# Install thread exception handler (Python 3.8+)
-if hasattr(threading, 'excepthook'):
-    threading.excepthook = thread_exception_handler
 
 def log_json(level, message, **extra_fields):
     """Helper function to log with extra fields"""
@@ -268,52 +227,30 @@ log_json("info", "Starting Meshtastic connection with auto-reconnect",
     reconnect_interval=60
 )
 
+
 interface = None
 reconnect_interval = 60  # seconds
 
 def cleanup_interface():
-    """Aggressively cleanup the current interface"""
     global interface
     if interface:
         try:
-            # Try to close gracefully first
             interface.close()
-        except:
+        except Exception:
             pass
-        
-        try:
-            # Force close socket if it exists
-            if hasattr(interface, 'socket') and interface.socket:
-                interface.socket.close()
-        except:
-            pass
-        
-        # Clear the interface
         interface = None
-        
-        # Give time for threads to cleanup
-        time.sleep(2)
 
 def create_connection():
-    """Create a new Meshtastic TCP interface with robust cleanup"""
     global interface
-    
-    # Aggressive cleanup first
     cleanup_interface()
-    
     try:
         log_json("info", "Creating new TCP interface",
             event_type="creating_interface",
             hostname=connection_target
         )
-        
         interface = meshtastic.tcp_interface.TCPInterface(hostname=connection_target)
-        
-        # Test the connection immediately
         if hasattr(interface, 'socket') and interface.socket:
-            # Give it a moment to establish
             time.sleep(1)
-            
             log_json("info", "TCP interface created successfully",
                 event_type="interface_created",
                 hostname=connection_target
@@ -324,8 +261,7 @@ def create_connection():
                 event_type="interface_creation_failed",
                 hostname=connection_target
             )
-            return False
-            
+            sys.exit(1)
     except Exception as e:
         log_json("error", "Failed to create interface",
             event_type="interface_creation_failed",
@@ -333,69 +269,50 @@ def create_connection():
             hostname=connection_target
         )
         cleanup_interface()
-        return False
+        sys.exit(1)
 
 def is_connection_healthy():
-    """Check if the connection is still healthy with multiple tests"""
     try:
         if not interface:
             return False
-            
         if not hasattr(interface, 'socket') or not interface.socket:
             return False
-        
-        # Test 1: Check socket file descriptor
         try:
             fd = interface.socket.fileno()
             if fd == -1:
                 return False
-        except:
+        except Exception:
             return False
-        
-        # Test 2: Check socket state
         try:
             interface.socket.getpeername()
         except OSError:
-            # Socket is not connected
             return False
-        except:
+        except Exception:
             return False
-        
         return True
-        
     except Exception as e:
         log_json("debug", "Connection health check failed",
             event_type="health_check_error",
             error=str(e)
         )
-        return False
+        sys.exit(1)
 
 def safe_send_message(message: str, channel: int) -> bool:
-    """Safely send a message with connection health checks"""
     try:
         if not is_connection_healthy():
-            log_json("warning", "Cannot send message - connection unhealthy",
+            log_json("error", "Cannot send message - connection unhealthy",
                 event_type="send_message_failed",
                 reason="unhealthy_connection"
             )
-            return False
-            
+            sys.exit(1)
         interface.sendText(message, channelIndex=channel)
         return True
-        
-    except (BrokenPipeError, ConnectionResetError, OSError) as e:
-        log_json("warning", "Connection error while sending message",
-            event_type="send_message_connection_error", 
-            error=str(e),
-            message_preview=message[:50] + "..." if len(message) > 50 else message
-        )
-        return False
     except Exception as e:
-        log_json("error", "Unexpected error sending message",
-            event_type="send_message_unexpected_error",
+        log_json("error", "Error sending message",
+            event_type="send_message_error",
             error=str(e)
         )
-        return False
+        sys.exit(1)
 
 def execute_scheduled_content(content: str, channel: int, user_id: str, schedule_id: int):
     """Execute scheduled content (command or message) with robust error handling"""
@@ -467,68 +384,24 @@ def execute_scheduled_content(content: str, channel: int, user_id: str, schedule
         )
 
 def schedule_worker():
-    """Background worker that checks and executes schedules every minute"""
     log_json("info", "Schedule worker started",
         event_type="schedule_worker_started"
     )
-    
     while True:
-        try:
-            if schedule_manager:
-                due_schedules = schedule_manager.get_due_schedules()
-                
-                for schedule in due_schedules:
-                    execute_scheduled_content(
-                        schedule['content'],
-                        schedule['channel'],
-                        schedule['user_id'],
-                        schedule['id']
-                    )
-            
-            # Wait until the next minute
-            current_time = datetime.now()
-            next_minute = current_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
-            sleep_seconds = (next_minute - current_time).total_seconds()
-            time.sleep(max(1, sleep_seconds))
-            
-        except Exception as e:
-            log_json("error", "Error in schedule worker",
-                event_type="schedule_worker_error",
-                error=str(e)
-            )
-            time.sleep(60)  # Wait a minute before retrying
+        if schedule_manager:
+            due_schedules = schedule_manager.get_due_schedules()
+            for schedule in due_schedules:
+                execute_scheduled_content(
+                    schedule['content'],
+                    schedule['channel'],
+                    schedule['user_id'],
+                    schedule['id']
+                )
+        current_time = datetime.now()
+        next_minute = current_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        sleep_seconds = (next_minute - current_time).total_seconds()
+        time.sleep(max(1, sleep_seconds))
 
-# Connection failure tracking for restart decision
-connection_failures = 0
-last_failure_reset = time.time()
-MAX_FAILURES_BEFORE_RESTART = 10
-FAILURE_RESET_INTERVAL = 3600  # Reset failure count every hour
-
-def should_restart_process():
-    """Check if we should restart the entire process due to too many failures"""
-    global connection_failures, last_failure_reset
-    
-    current_time = time.time()
-    
-    # Reset failure count every hour
-    if current_time - last_failure_reset > FAILURE_RESET_INTERVAL:
-        connection_failures = 0
-        last_failure_reset = current_time
-        log_json("info", "Connection failure counter reset",
-            event_type="failure_counter_reset"
-        )
-    
-    connection_failures += 1
-    
-    if connection_failures >= MAX_FAILURES_BEFORE_RESTART:
-        log_json("critical", "Too many connection failures, process restart recommended",
-            event_type="process_restart_recommended",
-            failure_count=connection_failures,
-            max_failures=MAX_FAILURES_BEFORE_RESTART
-        )
-        return True
-    
-    return False
 
 # Start schedule worker thread
 schedule_thread = threading.Thread(target=schedule_worker, daemon=True)
@@ -538,118 +411,40 @@ log_json("info", "Schedule worker thread started",
     event_type="schedule_thread_started"
 )
 
-# Main connection loop with auto-reconnect and restart protection
+# Single connection attempt, exit on failure
+if not create_connection():
+    log_json("error", "Initial connection failed, exiting",
+        event_type="connection_failed"
+    )
+    sys.exit(1)
+
+# Main monitoring loop
+connection_start_time = time.time()
+last_health_check = time.time()
 while True:
     try:
-        # Create initial connection
-        if not create_connection():
-            log_json("warning", "Initial connection failed, retrying in 60 seconds",
-                event_type="connection_retry_scheduled",
-                retry_delay=reconnect_interval
-            )
-            
-            # Check if we should restart the process
-            if should_restart_process():
-                log_json("critical", "Initiating process restart due to connection failures",
-                    event_type="process_restarting"
+        health_check_interval = 30
+        current_time = time.time()
+        if current_time - last_health_check > health_check_interval:
+            if not is_connection_healthy():
+                log_json("error", "Connection health check failed, exiting",
+                    event_type="connection_unhealthy",
+                    uptime_seconds=int(current_time - connection_start_time)
                 )
                 cleanup_interface()
-                sys.exit(1)  # Exit with error code to trigger container restart
-            
-            time.sleep(reconnect_interval)
-            continue
-        
-        # Main monitoring loop
-        connection_start_time = time.time()
-        last_health_check = time.time()
-        consecutive_failures = 0
-        
-        while True:
-            try:
-                # Check connection health more frequently after failures
-                health_check_interval = 10 if consecutive_failures > 0 else 30
-                current_time = time.time()
-                
-                if current_time - last_health_check > health_check_interval:
-                    if not is_connection_healthy():
-                        consecutive_failures += 1
-                        log_json("warning", f"Connection health check failed (attempt {consecutive_failures})",
-                            event_type="connection_unhealthy",
-                            uptime_seconds=int(current_time - connection_start_time),
-                            consecutive_failures=consecutive_failures
-                        )
-                        
-                        # Break immediately on health check failure
-                        break
-                    else:
-                        # Reset failure counter on successful health check
-                        if consecutive_failures > 0:
-                            log_json("info", "Connection health restored",
-                                event_type="connection_health_restored",
-                                uptime_seconds=int(current_time - connection_start_time)
-                            )
-                            consecutive_failures = 0
-                        
-                    last_health_check = current_time
-                
-                time.sleep(1)
-                
-            except KeyboardInterrupt:
-                log_json("info", "Shutdown requested by user",
-                    event_type="user_shutdown",
-                    uptime_seconds=int(time.time() - connection_start_time)
-                )
-                raise
-            except (BrokenPipeError, ConnectionResetError, OSError) as e:
-                log_json("warning", "Connection error detected in monitoring loop",
-                    event_type="monitoring_connection_error",
-                    error=str(e),
-                    uptime_seconds=int(time.time() - connection_start_time)
-                )
-                break  # Break inner loop to reconnect immediately
-            except Exception as e:
-                log_json("warning", "Unexpected error in monitoring loop",
-                    event_type="monitoring_unexpected_error",
-                    error=str(e),
-                    uptime_seconds=int(time.time() - connection_start_time)
-                )
-                break  # Break inner loop to reconnect
-        
-        # Connection lost, schedule reconnect
-        uptime = int(time.time() - connection_start_time)
-        log_json("warning", "Connection lost, reconnecting",
-            event_type="connection_lost",
-            uptime_seconds=uptime,
-            reconnect_delay=reconnect_interval
-        )
-        
-        # Aggressive cleanup of current connection
-        cleanup_interface()
-        
-        time.sleep(reconnect_interval)
-        
+                sys.exit(1)
+            last_health_check = current_time
+        time.sleep(1)
     except KeyboardInterrupt:
         log_json("info", "Shutting down gracefully",
             event_type="graceful_shutdown"
         )
+        cleanup_interface()
         break
     except Exception as e:
-        log_json("error", "Unexpected error in main loop",
+        log_json("error", "Unexpected error in main loop, exiting",
             event_type="main_loop_error",
-            error=str(e),
-            reconnect_delay=reconnect_interval
+            error=str(e)
         )
-        time.sleep(reconnect_interval)
-
-# Final cleanup
-try:
-    if interface:
-        interface.close()
-        log_json("info", "Connection closed",
-            event_type="connection_closed"
-        )
-except Exception as e:
-    log_json("warning", "Error during cleanup",
-        event_type="cleanup_error",
-        error=str(e)
-    )
+        cleanup_interface()
+        sys.exit(1)
