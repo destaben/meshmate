@@ -9,7 +9,7 @@ scrape_configs:
   # MeshMate bot metrics
   - job_name: 'meshmate'
     static_configs:
-      - targets: ['localhost:8080']  # Change to your MeshMate host:port
+      - targets: ['localhost:9900']  # Change to your MeshMate host:port
     
     # Optional: Add labels for better organization in Prometheus
     relabel_configs:
@@ -31,9 +31,9 @@ scrape_configs:
 # If MeshMate is running in Docker with host networking:
 #   - job_name: 'meshmate'
 #     static_configs:
-#       - targets: ['host.docker.internal:8080']
+#       - targets: ['host.docker.internal:9900']
 
 # Example for remote MeshMate instance:
 #   - job_name: 'meshmate-remote'
 #     static_configs:
-#       - targets: ['192.168.1.100:8080']
+#       - targets: ['192.168.1.100:9900']

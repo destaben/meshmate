@@ -265,7 +265,7 @@ meshtastic_hostname = os.getenv('MESHTASTIC_HOSTNAME')
 channels = os.getenv('CHANNELS', 'iberia').split()
 log_all_messages = os.getenv('LOG_ALL_MESSAGES', 'false').lower() == 'true'
 aemet_api_key = os.getenv('AEMET_API_KEY')
-api_port = int(os.getenv('API_PORT', '8080'))
+api_port = int(os.getenv('API_PORT', '9900'))
 api_host = os.getenv('API_HOST', '0.0.0.0')
 
 # Determine connection target (IP takes priority over hostname)

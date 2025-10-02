@@ -16,12 +16,12 @@ logger = logging.getLogger('meshmate.api')
 class APIServer:
     """Flask-based HTTP API server for MeshMate"""
     
-    def __init__(self, port: int = 8080, host: str = '0.0.0.0'):
+    def __init__(self, port: int = 9900, host: str = '0.0.0.0'):
         """
         Initialize API server
         
         Args:
-            port: Port to listen on (default: 8080)
+            port: Port to listen on (default: 9900)
             host: Host to bind to (default: 0.0.0.0)
         """
         self.port = port

@@ -109,7 +109,7 @@ When using Docker or docker-compose:
   - `CHANNELS`: List of channels to monitor (default: `iberia`). Use `all` for all channels
   - `LOG_ALL_MESSAGES`: Log all messages, not just commands (default: `false`)
   - `AEMET_API_KEY`: AEMET API key for RED weather alerts (`/meteo` command)
-  - `API_PORT`: HTTP API server port (default: `8080`)
+  - `API_PORT`: HTTP API server port (default: `9900`)
   - `API_HOST`: HTTP API server host (default: `0.0.0.0`)
 
 ### Command Line Arguments (Local Python)
@@ -240,7 +240,7 @@ Prometheus-compatible metrics endpoint for scraping. Returns metrics in Promethe
 **Example:**
 
 ```bash
-curl http://localhost:8080/metrics
+curl http://localhost:9900/metrics
 ```
 
 #### `GET /health`
@@ -295,12 +295,12 @@ Send a message to Meshtastic network via HTTP.
 
 ```bash
 # Send a message to default channel (0)
-curl -X POST http://localhost:8080/send \
+curl -X POST http://localhost:9900/send \
   -H "Content-Type: application/json" \
   -d '{"text": "Hello Mesh Network!"}'
 
 # Send to specific channel
-curl -X POST http://localhost:8080/send \
+curl -X POST http://localhost:9900/send \
   -H "Content-Type: application/json" \
   -d '{"text": "Alert: System status OK", "channel": 1}'
 ```
@@ -332,7 +332,7 @@ Add this to your `prometheus.yml` to scrape MeshMate metrics:
 scrape_configs:
   - job_name: 'meshmate'
     static_configs:
-      - targets: ['localhost:8080']  # Adjust hostname as needed
+      - targets: ['localhost:9900']  # Adjust hostname as needed
     scrape_interval: 15s
     scrape_timeout: 10s
 ```
@@ -345,7 +345,7 @@ If running both Prometheus and MeshMate in Docker:
 scrape_configs:
   - job_name: 'meshmate'
     static_configs:
-      - targets: ['host.docker.internal:8080']  # Access host network
+      - targets: ['host.docker.internal:9900']  # Access host network
 ```
 
 ### API Server Configuration
@@ -354,7 +354,7 @@ The API server can be configured via environment variables:
 
 ```bash
 # Default configuration
-API_PORT=8080
+API_PORT=9900
 API_HOST=0.0.0.0
 
 # Custom port

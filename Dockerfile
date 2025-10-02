@@ -24,7 +24,7 @@ RUN useradd --create-home --shell /bin/bash meshmate
 RUN mkdir -p /app/data && chown meshmate:meshmate /app/data
 
 # Expose API port for Prometheus metrics and HTTP endpoints
-EXPOSE 8080
+EXPOSE 9900
 
 # Switch to non-root user
 USER meshmate
