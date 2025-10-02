@@ -3,6 +3,10 @@ import os
 from datetime import datetime, time
 from typing import Dict, List, Optional, Any
 import threading
+from zoneinfo import ZoneInfo
+
+# Timezone configuration - always use Europe/Madrid
+TIMEZONE = ZoneInfo("Europe/Madrid")
 
 
 class ScheduleManager:
@@ -125,7 +129,7 @@ class ScheduleManager:
                     'time': schedule_time,
                     'content': content,
                     'channel': channel,
-                    'created_at': datetime.now().isoformat(),
+                    'created_at': datetime.now(TIMEZONE).isoformat(),
                     'is_command': content.strip().startswith('/'),
                     'active': True,
                     'weekdays': parsed_weekdays,  # None for one-time, list of numbers for recurring
@@ -197,7 +201,7 @@ class ScheduleManager:
     def get_due_schedules(self) -> List[Dict[str, Any]]:
         """Get all schedules that should be executed now"""
         with self.lock:
-            current_datetime = datetime.now()
+            current_datetime = datetime.now(TIMEZONE)
             current_time = current_datetime.time()
             current_minute = current_time.replace(second=0, microsecond=0)
             current_weekday = current_datetime.weekday()  # 0=Monday, 6=Sunday

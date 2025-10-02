@@ -1,0 +1,39 @@
+# Example Prometheus configuration for scraping MeshMate metrics
+# Copy this to your Prometheus configuration directory
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # MeshMate bot metrics
+  - job_name: 'meshmate'
+    static_configs:
+      - targets: ['localhost:8080']  # Change to your MeshMate host:port
+    
+    # Optional: Add labels for better organization in Prometheus
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'meshmate-bot'
+    
+    # Recommended settings for MeshMate
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    
+    # Optional: Add custom labels
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'meshmate_.*'
+        action: keep
+
+# Example for Docker deployment
+# If MeshMate is running in Docker with host networking:
+#   - job_name: 'meshmate'
+#     static_configs:
+#       - targets: ['host.docker.internal:8080']
+
+# Example for remote MeshMate instance:
+#   - job_name: 'meshmate-remote'
+#     static_configs:
+#       - targets: ['192.168.1.100:8080']

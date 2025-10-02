@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the application
 COPY main.py .
 COPY schedule_manager.py .
+COPY metrics.py .
+COPY api_server.py .
 COPY handlers/ handlers/
 
 # Create a non-root user for security
@@ -20,6 +22,9 @@ RUN useradd --create-home --shell /bin/bash meshmate
 
 # Create data directory for schedules persistence
 RUN mkdir -p /app/data && chown meshmate:meshmate /app/data
+
+# Expose API port for Prometheus metrics and HTTP endpoints
+EXPOSE 8080
 
 # Switch to non-root user
 USER meshmate

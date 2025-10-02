@@ -7,14 +7,22 @@ import json
 import logging
 import os
 import threading
+from zoneinfo import ZoneInfo
 from handlers import PingHandler, MeteoHandler, InfoHandler, HelpHandler, ScheduleHandler
 from schedule_manager import ScheduleManager
+from api_server import APIServer
+import metrics
+
+# Timezone configuration - always use Europe/Madrid
+TIMEZONE = ZoneInfo("Europe/Madrid")
 
 # Configure JSON logging
 class JSONFormatter(logging.Formatter):
     def format(self, record):
+        # Use Europe/Madrid timezone for all timestamps
+        local_time = datetime.now(TIMEZONE)
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": local_time.isoformat(),
             "level": record.levelname,
             "logger": "meshmate",
             "message": record.getMessage(),
@@ -108,6 +116,33 @@ def onReceive(packet, interface):
             rx_time = packet.get('rxTime', 0)
             channel = packet.get('channel', 0)
             
+            # Update metrics for message received
+            metrics.messages_received_total.labels(
+                channel=f'channel_{channel}',
+                sender=sender_id
+            ).inc()
+            
+            # Update signal metrics if available
+            if 'rxRssi' in packet:
+                metrics.signal_rssi.labels(
+                    sender=sender_id,
+                    channel=f'channel_{channel}'
+                ).set(packet['rxRssi'])
+            
+            if 'rxSnr' in packet:
+                metrics.signal_snr.labels(
+                    sender=sender_id,
+                    channel=f'channel_{channel}'
+                ).set(packet['rxSnr'])
+            
+            # Calculate and update hops
+            if 'hopStart' in packet and 'hopLimit' in packet:
+                hops = packet['hopStart'] - packet['hopLimit']
+                metrics.hops_used.labels(
+                    sender=sender_id,
+                    channel=f'channel_{channel}'
+                ).set(hops)
+            
             # Get channel name if available from interface
             channel_name = f"Channel {channel}"
             try:
@@ -120,9 +155,9 @@ def onReceive(packet, interface):
             except:
                 pass  # Fallback to default channel name
             
-            # Convert timestamp to readable date
+            # Convert timestamp to readable date in Europe/Madrid timezone
             if rx_time:
-                timestamp = datetime.fromtimestamp(rx_time).strftime('%H:%M:%S %d/%m/%Y')
+                timestamp = datetime.fromtimestamp(rx_time, TIMEZONE).strftime('%H:%M:%S %d/%m/%Y')
             else:
                 timestamp = 'No timestamp'
             
@@ -172,7 +207,36 @@ def onReceive(packet, interface):
                         sender_id=sender_id,
                         message_text=message_text
                     )
-                    handler.handle(packet, interface, log_json)
+                    
+                    # Track command processing start time
+                    start_time = time.time()
+                    
+                    try:
+                        handler.handle(packet, interface, log_json)
+                        
+                        # Update success metrics
+                        command_name = message_text.split()[0].lstrip('/')
+                        metrics.commands_processed_total.labels(
+                            command=command_name,
+                            channel=channel_name
+                        ).inc()
+                        
+                        # Record command duration
+                        duration = time.time() - start_time
+                        metrics.command_duration_seconds.labels(
+                            command=command_name
+                        ).observe(duration)
+                        
+                    except Exception as e:
+                        # Update error metrics
+                        command_name = message_text.split()[0].lstrip('/')
+                        metrics.commands_failed_total.labels(
+                            command=command_name,
+                            channel=channel_name
+                        ).inc()
+                        metrics.errors_total.labels(error_type='handler_error').inc()
+                        raise
+                    
                     handler_found = True
                     break  # Only let the first matching handler process the message
             
@@ -188,6 +252,8 @@ def onConnection(interface, topic=pub.AUTO_TOPIC):
         event_type="connection_established",
         status="connected"
     )
+    # Update connection status metric
+    metrics.meshtastic_connection_status.set(1)
 
 # Subscribe to events
 pub.subscribe(onReceive, "meshtastic.receive")
@@ -199,6 +265,8 @@ meshtastic_hostname = os.getenv('MESHTASTIC_HOSTNAME')
 channels = os.getenv('CHANNELS', 'iberia').split()
 log_all_messages = os.getenv('LOG_ALL_MESSAGES', 'false').lower() == 'true'
 aemet_api_key = os.getenv('AEMET_API_KEY')
+api_port = int(os.getenv('API_PORT', '8080'))
+api_host = os.getenv('API_HOST', '0.0.0.0')
 
 # Determine connection target (IP takes priority over hostname)
 connection_target = meshtastic_ip or meshtastic_hostname
@@ -239,6 +307,8 @@ def cleanup_interface():
         except Exception:
             pass
         interface = None
+        # Update connection status metric
+        metrics.meshtastic_connection_status.set(0)
 
 def create_connection():
     global interface
@@ -306,12 +376,15 @@ def safe_send_message(message: str, channel: int) -> bool:
             )
             sys.exit(1)
         interface.sendText(message, channelIndex=channel)
+        # Update metrics for sent message
+        metrics.messages_sent_total.labels(channel=f'channel_{channel}').inc()
         return True
     except Exception as e:
         log_json("error", "Error sending message",
             event_type="send_message_error",
             error=str(e)
         )
+        metrics.errors_total.labels(error_type='send_message_error').inc()
         sys.exit(1)
 
 def execute_scheduled_content(content: str, channel: int, user_id: str, schedule_id: int):
@@ -351,6 +424,9 @@ def execute_scheduled_content(content: str, channel: int, user_id: str, schedule
                     )
                     
                     handler.handle(fake_packet, interface, log_json)
+                    
+                    # Update scheduled task metrics
+                    metrics.scheduled_tasks_executed_total.labels(user=user_id).inc()
                     break
         else:
             # It's a regular message - send directly with safe wrapper
@@ -365,6 +441,8 @@ def execute_scheduled_content(content: str, channel: int, user_id: str, schedule
                     reminder_content=content,
                     channel=channel
                 )
+                # Update scheduled task metrics
+                metrics.scheduled_tasks_executed_total.labels(user=user_id).inc()
             else:
                 log_json("warning", "Failed to send scheduled reminder",
                     event_type="schedule_reminder_failed",
@@ -382,6 +460,7 @@ def execute_scheduled_content(content: str, channel: int, user_id: str, schedule
             schedule_id=schedule_id,
             content=content
         )
+        metrics.errors_total.labels(error_type='schedule_execution_error').inc()
 
 def schedule_worker():
     log_json("info", "Schedule worker started",
@@ -397,7 +476,7 @@ def schedule_worker():
                     schedule['user_id'],
                     schedule['id']
                 )
-        current_time = datetime.now()
+        current_time = datetime.now(TIMEZONE)
         next_minute = current_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
         sleep_seconds = (next_minute - current_time).total_seconds()
         time.sleep(max(1, sleep_seconds))
@@ -411,12 +490,28 @@ log_json("info", "Schedule worker thread started",
     event_type="schedule_thread_started"
 )
 
+# Initialize and start API server
+api_server = APIServer(port=api_port, host=api_host)
+api_server.set_log_function(log_json)
+
+log_json("info", "Starting API server",
+    event_type="api_server_init",
+    host=api_host,
+    port=api_port
+)
+
 # Single connection attempt, exit on failure
 if not create_connection():
     log_json("error", "Initial connection failed, exiting",
         event_type="connection_failed"
     )
     sys.exit(1)
+
+# Set the meshtastic interface in the API server after successful connection
+api_server.set_meshtastic_interface(interface)
+
+# Start API server in background thread
+api_server.run_in_thread()
 
 # Main monitoring loop
 connection_start_time = time.time()

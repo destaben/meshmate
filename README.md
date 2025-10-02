@@ -7,6 +7,9 @@ Meshtastic message listener and ping responder bot.
 - Listens to text messages on configured channels
 - Automatically responds to `/ping` commands with hop and signal info
 - **RED weather alerts** via `/meteo` command using AEMET API (Spain)
+- **Prometheus metrics** endpoint for monitoring and observability
+- **HTTP API** for sending messages programmatically
+- Scheduled commands and reminders with flexible timing
 - Modular handler system for extensible commands
 - Configurable channel monitoring
 - JSON structured logging
@@ -95,12 +98,23 @@ docker run -d --name meshmate-container meshmate --ip 192.168.1.230
 
 ## Configuration
 
-### Required Parameters
+### Environment Variables
+
+When using Docker or docker-compose:
+
+- **Required**:
+  - `MESHTASTIC_IP` or `MESHTASTIC_HOSTNAME`: IP address or hostname of the Meshtastic device
+
+- **Optional**:
+  - `CHANNELS`: List of channels to monitor (default: `iberia`). Use `all` for all channels
+  - `LOG_ALL_MESSAGES`: Log all messages, not just commands (default: `false`)
+  - `AEMET_API_KEY`: AEMET API key for RED weather alerts (`/meteo` command)
+  - `API_PORT`: HTTP API server port (default: `8080`)
+  - `API_HOST`: HTTP API server host (default: `0.0.0.0`)
+
+### Command Line Arguments (Local Python)
 
 - `--ip` or `--hostname`: IP address or hostname of the Meshtastic device
-
-### Optional Parameters
-
 - `--channels`: List of channels to monitor (default: iberia). Use "all" for all channels
 - `--log-all-messages`: Log all messages, not just commands  
 - `--aemet-api-key`: AEMET API key for RED weather alerts (/meteo command)
@@ -196,6 +210,168 @@ Shows project information and encourages contributions:
 
 ¡Contribuye! 🚀
 ```
+
+## HTTP API & Prometheus Metrics
+
+MeshMate includes an HTTP API server for programmatic control and Prometheus metrics for monitoring.
+
+### Endpoints
+
+#### `GET /metrics`
+
+Prometheus-compatible metrics endpoint for scraping. Returns metrics in Prometheus text format.
+
+**Available Metrics:**
+
+- `meshmate_messages_received_total` - Total messages received (by channel, sender)
+- `meshmate_messages_sent_total` - Total messages sent (by channel)
+- `meshmate_commands_processed_total` - Commands successfully processed (by command, channel)
+- `meshmate_commands_failed_total` - Failed commands (by command, channel)
+- `meshmate_command_duration_seconds` - Command processing time histogram (by command)
+- `meshmate_meshtastic_connection_status` - Connection status (1=connected, 0=disconnected)
+- `meshmate_signal_rssi` - Last received signal RSSI (by sender, channel)
+- `meshmate_signal_snr` - Last received signal SNR (by sender, channel)
+- `meshmate_hops_used` - Hops used in last message (by sender, channel)
+- `meshmate_scheduled_tasks_total` - Active scheduled tasks (by user)
+- `meshmate_scheduled_tasks_executed_total` - Executed scheduled tasks (by user)
+- `meshmate_errors_total` - Total errors (by error_type)
+- `meshmate_http_requests_total` - HTTP API requests (by endpoint, method, status)
+
+**Example:**
+
+```bash
+curl http://localhost:8080/metrics
+```
+
+#### `GET /health`
+
+Health check endpoint for monitoring system status.
+
+**Response:**
+
+```json
+{
+  "status": "healthy",
+  "meshtastic_connected": true,
+  "version": "1.0.0"
+}
+```
+
+#### `POST /send`
+
+Send a message to Meshtastic network via HTTP.
+
+**Request Body:**
+
+```json
+{
+  "text": "Hello from HTTP API!",
+  "channel": 0
+}
+```
+
+**Parameters:**
+
+- `text` (required): Message text to send
+- `channel` (optional): Channel index (default: 0)
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "message": "Message sent successfully",
+  "channel": 0
+}
+```
+
+**Error Responses:**
+
+- `400` - Invalid request (missing text, invalid channel)
+- `503` - Meshtastic interface not available
+- `500` - Internal server error
+
+**Example:**
+
+```bash
+# Send a message to default channel (0)
+curl -X POST http://localhost:8080/send \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hello Mesh Network!"}'
+
+# Send to specific channel
+curl -X POST http://localhost:8080/send \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Alert: System status OK", "channel": 1}'
+```
+
+#### `GET /info`
+
+Get bot information and available endpoints.
+
+**Response:**
+
+```json
+{
+  "name": "MeshMate",
+  "version": "1.0.0",
+  "endpoints": {
+    "/metrics": "Prometheus metrics (GET)",
+    "/health": "Health check (GET)",
+    "/send": "Send message (POST)",
+    "/info": "Bot information (GET)"
+  }
+}
+```
+
+### Prometheus Configuration
+
+Add this to your `prometheus.yml` to scrape MeshMate metrics:
+
+```yaml
+scrape_configs:
+  - job_name: 'meshmate'
+    static_configs:
+      - targets: ['localhost:8080']  # Adjust hostname as needed
+    scrape_interval: 15s
+    scrape_timeout: 10s
+```
+
+**Docker Network Example:**
+
+If running both Prometheus and MeshMate in Docker:
+
+```yaml
+scrape_configs:
+  - job_name: 'meshmate'
+    static_configs:
+      - targets: ['host.docker.internal:8080']  # Access host network
+```
+
+### API Server Configuration
+
+The API server can be configured via environment variables:
+
+```bash
+# Default configuration
+API_PORT=8080
+API_HOST=0.0.0.0
+
+# Custom port
+API_PORT=9090
+
+# Bind to localhost only (more secure)
+API_HOST=127.0.0.1
+```
+
+### Security Considerations
+
+- The API server does not include authentication by default
+- For production use, consider:
+  - Running behind a reverse proxy (nginx, traefik) with authentication
+  - Using firewall rules to restrict access
+  - Binding to `127.0.0.1` for local-only access
+  - Implementing rate limiting at the proxy level
 
 ### `/schedule`
 
