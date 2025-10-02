@@ -12,14 +12,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application
 COPY main.py .
+COPY schedule_manager.py .
 COPY handlers/ handlers/
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash meshmate
+
+# Create data directory for schedules persistence
+RUN mkdir -p /app/data && chown meshmate:meshmate /app/data
+
+# Switch to non-root user
 USER meshmate
 
 # Set the entrypoint to run the script
 ENTRYPOINT ["python", "main.py"]
-
-# Default command shows help if no arguments are provided
-CMD ["--help"]
